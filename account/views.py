@@ -1,4 +1,6 @@
 from django.shortcuts import render
+
+from login_hola9 import settings
 from . models import *
 from . serializers import *
 from rest_framework.response import Response
@@ -810,8 +812,8 @@ class CheckLoginLogoutAvailability(APIView):
                 if login_time_str is None or logout_time_str is None:
                     continue  # Skip this entry if either login_time or logout_time is empty
 
-                login_time = datetime.strptime(login_time_str, "%I:%M:%S %p")
-                logout_time = datetime.strptime(logout_time_str, "%I:%M:%S %p")
+                login_time = datetime.strptime(login_time_str, "%H:%M%S")
+                logout_time = datetime.strptime(logout_time_str, "%H:%M%S")
                 duration = logout_time - login_time
                 if duration < timedelta(hours=8):
                     filtered_employee_data.append(employee_data)
@@ -953,6 +955,7 @@ class AdminApiUpdateDelete(APIView):
         media.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     
+    
 class TrustedComapnyView(APIView):
     def get(self,request,format=None):
         com=TrustedCompany.objects.all()
@@ -981,32 +984,44 @@ class TrustedCompanyUpdateDelete(APIView):
         return Response({"Message":"Delete Successfully !!!"},status=status.HTTP_204_NO_CONTENT)
     
 class ProjectDetailsView(APIView):
-    # def get(self, request):
-    #     projects = ProjectDetails.objects.all()
-    #     pro_data = []
+    def get(self, request):
+        pro = ProjectDetails.objects.all()
+        pro_data = []
 
-    #     for prodetail in projects:
-    #         serializer = ProjectDetailSerializer(prodetail)
-    #         profiles_data = []  # Initialize an empty list for profile data
-
-    #         employee_names = [name.strip() for name in prodetail.employeename.split(',')]
+        for pro_details in pro:
+            serializer = ProjectDetailSerializer(pro_details)
             
-    #         for employee_name in employee_names:
-    #             try:
-    #                 profiles = LoginProfile.objects.filter(name=employee_name)
-    #                 for profile in profiles:
-    #                     profile_serializer = LoginProfileSerializer(profile)
-    #                     profiles_data.append(profile_serializer.data)
-    #             except LoginProfile.DoesNotExist:
-    #                 # Handle the case where no profiles are found for the current name
-    #                 pass
+            employeename_list = pro_details.employeename.split(',')
 
-    #         pro_data.append({
-    #             **serializer.data,
-    #             'profiles': profiles_data
-    #         })
+            tl_data = {'name': None, 'image': None}
+            emp_profiles = []
 
-    #     return Response(pro_data)
+            for emp_name in employeename_list:
+                try:
+                    profile = LoginProfile.objects.get(name=emp_name.strip())
+                    profile_serializer = LoginProfileSerializer2(profile)
+
+                    # Check if the employee is a TL based on the 'tl' field
+                    if profile.role == 'tl':
+                        tl_data = {
+                            'name': profile.name,
+                            'image': profile.image.url if profile.image else None
+                        }
+                    else:
+                        emp_profiles.append({
+                            'name': profile.name,
+                            'image': profile.image.url if profile.image else None
+                        })
+                except LoginProfile.DoesNotExist:
+                    pass
+
+            pro_data.append({
+                **serializer.data,
+                'tl': tl_data,
+                'emp_profiles': emp_profiles
+            })
+
+        return Response(pro_data)
     
     def post(self,request,format=None):
         serializer = ProjectDetailSerializer(data=request.data)
@@ -1053,6 +1068,93 @@ class EmployeeAprroveUpdateDelete(APIView):
         emp=EmployeeApprovDetails.objects.get(pk=pk)
         emp.delete()
         return Response({"Message":"Delete Successfully!!"},status=status.HTTP_204_NO_CONTENT)
+    
+class ForgotAdminPasswordView(APIView):
+    def post(self, request, format=None):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-                  
-     
+        # Implement your logic to reset the user's password here
+        user = serializer.save()
+
+        # You can include additional information in the response as needed
+        return Response({"detail": "Password reset successful.","new_password": user.password},status=status.HTTP_200_OK)
+# from account.utils import create_notification_functions
+class NotificationAPIView(APIView):
+    def get(self, request, *args, **kwargs):
+        name = request.GET.get('name')
+        if name:
+            notifications = Notifications.objects.filter(name=name)
+        else:
+            notifications = Notifications.objects.all()
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+        
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import OTP
+from .serializers import OTPSerializer
+from django.core.mail import send_mail
+# from django.conf import settings
+import random
+
+
+class SendOTP(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({'error': 'Email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        # Generate OTP
+        otp_code = ''.join(random.choices('0123456789', k=6))
+
+
+        # Save OTP to database
+        otp_instance = OTP.objects.create(email=email, otp_code=otp_code)
+
+
+        # Send OTP via email
+        send_mail(
+            'Your OTP',
+            f'Your OTP is: {otp_code}',
+            settings.EMAIL_HOST_USER,
+            [email],
+            fail_silently=False,
+        )
+
+
+        return Response({'message': 'OTP sent successfully'}, status=status.HTTP_200_OK)
+
+
+class VerifyOTP(APIView):
+    def post(self, request):
+        email = request.data.get('email')
+        otp_code = request.data.get('otp_code')
+
+
+        if not email or not otp_code:
+            return Response({'error': 'Email and OTP code are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        # Check if OTP exists
+        try:
+            otp_instance = OTP.objects.get(email=email, otp_code=otp_code)
+        except OTP.DoesNotExist:
+            return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        # If OTP is valid, delete it from the database
+        # otp_instance.delete()
+        otp_instance.is_verified = True
+        otp_instance.save()
+
+
+        return Response({'message': 'OTP verified successfully'}, status=status.HTTP_200_OK)
+
+
+
+    
+    

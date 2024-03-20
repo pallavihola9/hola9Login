@@ -57,7 +57,9 @@ admin.site.register(Image3)
 admin.site.register(AdminApi)   
 admin.site.register(TrustedCompany)
 admin.site.register(ProjectDetails)
-admin.site.register(EmployeeApprovDetails) 
+admin.site.register(EmployeeApprovDetails)
+admin.site.register(Notifications) 
+admin.site.register(OTP)
 
 
 

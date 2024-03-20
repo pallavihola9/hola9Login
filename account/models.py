@@ -1,5 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+from django.contrib.contenttypes.fields import GenericRelation
+# from account.models import Notification
+# from account.utils import create_notification
 
 # Create your models here.
 class CustomUserManager(BaseUserManager):
@@ -45,6 +48,7 @@ class User(AbstractBaseUser):
     
 from django.utils import timezone
 from datetime import timedelta
+
 class EmployeeDetails(models.Model):
     CHOICES = (
   ('25%', '25%'),
@@ -63,6 +67,23 @@ class EmployeeDetails(models.Model):
     comment = models.CharField(max_length=2332)
     document_base64 = models.TextField(blank=True, null=True)
     organization = models.CharField(max_length=255, blank=False, null=True, default=None)
+######################### When APi Staus is completed getting notification to tl and project members########
+    def save(self, *args, **kwargs):
+
+        super().save(*args, **kwargs)
+
+        if self.completion_status == '100%':
+            existing_notification = Notifications.objects.filter(
+                name=self.name,
+                message=f"Task completed: {self.task}"
+            ).exists()
+
+            if not existing_notification:
+                message = f"Hi {self.name}.Your Task {self.task}. Is completed "
+                Notifications.objects.create(name=self.name, message=message)
+   
+   
+    
 
     # def save(self, *args, **kwargs):
     #     # Call the original save method
@@ -100,10 +121,36 @@ class LoginProfile(models.Model):
     rating = models.CharField(max_length=255, blank=True, null=True)
     phone_number = models.CharField(max_length=20,null=True,blank=True) # add new filed phonenumber
 
+############################### notification for dob ##########################
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        # Extract day from dob and compare with current day
+        today = datetime.now().day
+        users_with_birthday = LoginProfile.objects.filter(dob__endswith=f'-{today}')
+         
+        for user in users_with_birthday:
+            # Check if a notification already exists for this user's birthday
+            existing_notification = Notifications.objects.filter(name=user, message__icontains="Happy Birthday").exists()
+            if not existing_notification:
+                message = f"Wish You a Very Happy Birthday  {user.name} From Hola9 Team!!"
+                Notifications.objects.create(name=user, message=message)
+                # Create notifications for AddUser
+                add_users = AddUser.objects.all()
+                for add_user in add_users:
+                    Notifications.objects.create(name=add_user.name, message=message)
+
+                # Create notifications for AdminApi
+                admin_users = AdminApi.objects.all()
+                for admin_user in admin_users:
+                    Notifications.objects.create(name=admin_user.name, message=message)
+    
 
 
     def __str__(self):
         return self.name
+
+                    
 
 
 class EmployeeLogin(models.Model):
@@ -199,22 +246,53 @@ class AssignTask(models.Model):
     postdate = models.CharField(max_length=255, null=True, blank=True) # New field for postdate
     tester = models.CharField(max_length=255, null=True, blank=True)  # New field for tester
     dummyone = models.CharField(max_length=255, null=True, blank=True)  
-
-
-
+    # notifications = GenericRelation(Notification)
+#################################### after due date  overdue date is true ###########################
     def save(self, *args, **kwargs):
-        if self.due_date:
-            # Adjust the specific time (e.g., 17:00:00 for 5:00 PM)
-            due_datetime = datetime.combine(self.due_date, datetime.min.time()) + timedelta(hours=17)
+        is_new_task = not self.pk  # Check if the task is being created (not updated)
 
-            # Check if the current date and time are greater than the adjusted due date and time
+        if is_new_task:
+            # Create notification for newly assigned tasks
+            message = f"Task assigned: {self.task_name} for {self.assignee_name}"
+            Notifications.objects.create(name=self.assignee_name, message=message)
+
+        # Check for overdue tasks
+        if self.due_date:
+            due_datetime = datetime.combine(self.due_date, datetime.min.time()) + timedelta(hours=19)
             if datetime.now() > due_datetime:
                 self.overdue_duedate = True
             else:
                 self.overdue_duedate = False
 
+        # Call the original save method
         super(AssignTask, self).save(*args, **kwargs)
 
+        if (is_new_task or self.overdue_duedate) and not self.task_done:
+        # admin_name = self.AdminApi.name
+        
+        # Retrieve pending tasks for the current assignee excluding the current task
+            pending_tasks = AssignTask.objects.filter(
+                assignee_name=self.assignee_name,
+                task_done=False,
+                overdue_duedate=True
+            ).exclude(pk=self.pk)
+
+            for task in pending_tasks:
+                existing_notification = Notifications.objects.filter(
+                    name=self.assignee_name,
+                    message=f" Pending task: {task.task_name} for {task.assignee_name}"
+                ).exists()
+
+                if not existing_notification:
+                    message = f"Pending task: {task.task_name} for {task.assignee_name}"
+                    print(message)
+                    Notifications.objects.create(name=self.assignee_name, message=message) 
+                    admin_user = AdminApi.objects.all()
+                    for ad_user in admin_user:
+                        Notifications.objects.create(name=ad_user.name,message=message)   
+        if self.task_done == True:
+            message = f"Hi {self.assignee_name} and {self.tl_name }This {self.task_name} Task is Done."
+            Notifications.objects.create(name=self.assignee_name,message=message)                   
 
     def __str__(self):
         return self.task_name
@@ -257,7 +335,20 @@ class EmployeeJoining(models.Model):
     extrafil_1 = models.CharField(max_length=255,default=False)
     extrafil_2 = models.CharField(max_length=255,default=False)
     organization = models.CharField(max_length=255, blank=False, null=True, default=None)
+ ############################## Salary Slip Genaration ########################################
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
 
+        # Salary Slip Generation Notifications
+        if self.is_salary_slip_generated():
+            message = f"Salary slip generated for {self.employeeName}"
+            Notifications.objects.create(name=self.employeeName, message=message)
+
+    def is_salary_slip_generated(self):
+        # Customize this logic based on your actual criteria for generating salary slips
+        # For demonstration purposes, assuming salary slip is generated when all fields are filled
+        return all(getattr(self, field.name) for field in self._meta.fields if field.name not in ['id', 'user'])
+ 
 
 
 
@@ -301,7 +392,7 @@ class ApplyLeaves(models.Model):
     admin_cancel = models.BooleanField(default=False)
     tl_approve = models.BooleanField(default=False)
     tl_cancel = models.BooleanField(default=False)
-    
+################################################################################    
     def save(self, *args, **kwargs):
         if self.admin_approve and self.tl_approve:
             try:
@@ -315,16 +406,31 @@ class ApplyLeaves(models.Model):
                 elif self.leave_type == 'casual_leave':
                     if int(login_profile.casual_leave) > 0:
                         login_profile.casual_leave = str(int(login_profile.casual_leave) - 1)
-                
                 # Save the updated LoginProfile
                 login_profile.save()
             except LoginProfile.DoesNotExist:
                 # Handle the case where the associated LoginProfile doesn't exist
                 pass
-        
         # Call the original save method to save the ApplyLeaves instance
         super().save(*args, **kwargs)
 
+         # Leave application notification
+        if not self.admin_approve and not self.tl_approve:
+            message = f"Leave application from {self.name} - {self.subject} To {self.tlname}"
+            Notifications.objects.create(name=self.name, message=message)
+
+        # Leave approval notification
+        elif self.admin_approve and self.tl_approve:
+            message = f"Hi {self.name} Your Leave Is approved For {self.subject}."
+            Notifications.objects.create(name=self.name, message=message)  
+
+        # Leave cancellation notification
+        if self.admin_cancel and self.tl_cancel:
+            print("Cancelling leave notification condition met")
+            message = f"Hi {self.name} Your Leave canceled For {self.subject}."
+            Notifications.objects.create(name=self.name, message=message)
+            
+   
 
     def __str__(self):
         return self.subject
@@ -351,6 +457,21 @@ class Feed(models.Model):
     image = models.ImageField(upload_to='feed_images/',null=True,blank=True)
     date = models.CharField(max_length=100)
     desc = models.TextField()
+######################### Feed creation Notification #######################################
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        holiday_date = datetime.strptime(self.date, "%Y-%m-%d").date()
+
+        if holiday_date == datetime.now().date():
+            adduser = AddUser.objects.all()
+            adminuser = AdminApi.objects.all()
+            message = f"New feed posted: {self.desc}"
+            for emp_user in adduser:
+              Notifications.objects.create(name=emp_user.name, message=message) 
+            for admin_user in adminuser:
+                Notifications.objects.create(name=admin_user.name,message=message)
+
+    
 
    
 
@@ -365,7 +486,8 @@ class WantedApi(models.Model):
     description = models.TextField()
     title = models.CharField(max_length=100)
     date = models.CharField(max_length=100)
-    event_type=models.CharField(max_length=100,default=None)
+    event_type = models.CharField(max_length=100, null=True, blank=True)
+
 
 
 
@@ -387,6 +509,33 @@ class Holiday(models.Model):
     image = models.ImageField(upload_to='holiday_images/')
     desc = models.CharField(max_length=255)
     organization = models.CharField(max_length=255)
+################################## Holiday Notification ################################
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        # Parse the holiday date string into a datetime object
+        holiday_date = datetime.strptime(self.date, "%Y-%m-%d").date()
+
+        # Calculate one day before the holiday date
+        one_day_before_holiday = holiday_date - timedelta(days=1)
+
+        # Check if today's date is one day before the holiday date
+        if datetime.now().date() == one_day_before_holiday:
+            # Get all users from AddUser and AdminApi
+            add_users = AddUser.objects.all()
+            admin_users = AdminApi.objects.all()
+
+            # Create holiday message
+            message = f"Tomorrow is Holiday. {self.holidayname}! Enjoy Your Holiday ....."
+
+            # Create notifications for AddUser
+            for add_user in add_users:
+                Notifications.objects.create(name=add_user.name, message=message)
+
+            # Create notifications for AdminApi
+            for admin_user in admin_users:
+                Notifications.objects.create(name=admin_user.name, message=message)   
+   
     
     
     
@@ -410,6 +559,7 @@ class AdminApi(models.Model):
     user_id = models.CharField(max_length=100)
     email =models.CharField(max_length=100, unique=True)
     password = models.CharField(max_length=100)
+    
 
     def set_social_media_link(self, platform, link):
         self.social_media_links[platform] = link
@@ -424,11 +574,6 @@ class TrustedCompany(models.Model):
     name=models.CharField(max_length=100,null=True,blank=True)
     logo = models.ImageField(upload_to='company_logo/')
     websiteurl = models.CharField(max_length=100,null=True,blank=True)    
-
-class Notification(models.Model):
-    user = models.ForeignKey(User,on_delete=models.CASCADE,null=True,blank=True)
-    message = models.CharField(max_length=100,null=True,blank=True)
-    created_date = models.DateTimeField(auto_now_add=True)
 
 class ProjectDetails(models.Model):
     projectname = models.CharField(max_length=255,null=True,blank=True)
@@ -453,3 +598,24 @@ class  EmployeeApprovDetails(models.Model):
                 emp.save()
             except EmployeeLogin2.DoesNotExist:
                 pass  # Handle the case where the associated EmployeeLogin2 instance does not exist 
+
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+
+class Notifications(models.Model):
+    # content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE,null=True,blank=True)
+    # object_id = models.PositiveIntegerField(null=True,blank=True)
+    # name = GenericForeignKey('content_type', 'object_id')
+    name = models.CharField(max_length=255)
+    message = models.CharField(max_length=100, null=True, blank=True)
+    created_date = models.DateTimeField(auto_now_add=True)     
+         
+    # def __str__(self):
+    #     return self.name
+
+from django.utils import timezone
+class OTP(models.Model):
+    email = models.EmailField()
+    otp_code = models.CharField(max_length=6)
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)    

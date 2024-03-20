@@ -1,6 +1,14 @@
+from base64 import urlsafe_b64encode
+import math
+import requests
 from rest_framework import serializers
-from .models import *
 
+import otp_reg
+# from otp_reg.views import generateOTP
+from .models import *
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+# from otp_reg.views import generateOTP
 
 
 class CustomUserSerializer(serializers.ModelSerializer):
@@ -147,3 +155,58 @@ class EmployeeApproveDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model= EmployeeApprovDetails
         fields='__all__'
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notifications
+        fields = '__all__'
+
+
+class OTPSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OTP
+        fields = ('email', 'otp_code')
+
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+    password2 = serializers.CharField(write_only=True)
+
+    def validate_email(self, value):
+        try:
+            user = AdminApi.objects.get(email=value)
+        except AdminApi.DoesNotExist:
+            raise serializers.ValidationError("User with this email does not exist.")
+        return user
+
+    def validate(self, data):
+        password = data.get('password')
+        password2 = data.get('password2')
+
+        if password != password2:
+            raise serializers.ValidationError("Passwords do not match.")
+
+        # Use Django's validate_password function for password validation
+        try:
+            validate_password(password)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(str(e))
+
+        return data
+
+    def create(self, validated_data):
+        user = validated_data['email']
+        password = validated_data['password']
+
+        # Implement your logic to reset the user's password here
+        user.password = password
+        user.save()  # Correctly saving the user instance
+
+        # Return the updated user instance
+        return user
+
+    
+
+

@@ -56,6 +56,14 @@ urlpatterns = [
      path('empapprovdetail/', EmployeeApproveDetailView.as_view(), name='empapprovdetail'), 
      path('empapprovdetail/<int:pk>/', EmployeeAprroveUpdateDelete.as_view(), name='empapprovdetail'),
 
+     path('usernotification/', NotificationAPIView.as_view(), name='usernotification'),
+
+     path('forgotadminpassword/', ForgotAdminPasswordView.as_view(), name='forgotadminpassword'),   
+     
+     path('send-otp/', SendOTP.as_view(), name='send_otp'),
+     path('verify-otp/', VerifyOTP.as_view(), name='verify_otp'),
+      
+
 
 
 
